@@ -3,12 +3,22 @@ using System.Reflection;
 
 namespace DiGi.Revit.UI.Classes
 {
+    /// <summary>
+    /// Revit add-in bootstrap (<see cref="IExternalApplication"/>) that enables the DiGi assembly
+    /// resolver so managed and native assemblies deployed from a version-specific Revit directory
+    /// load correctly.
+    /// </summary>
     public sealed class ExternalApplication : IExternalApplication
     {
         private static readonly AssemblyResolver.Classes.AssemblyResolver assemblyResolver = new();
 
         private readonly List<IExternalApplication> externalApplications = [];
 
+        /// <summary>
+        /// Forwards shutdown to the external applications loaded during <see cref="OnStartup"/>.
+        /// </summary>
+        /// <param name="application">The Revit application being shut down.</param>
+        /// <returns><see cref="Result.Succeeded"/></returns>
         public Result OnShutdown(UIControlledApplication application)
         {
             foreach(IExternalApplication externalApplication in externalApplications)
@@ -19,6 +29,16 @@ namespace DiGi.Revit.UI.Classes
             return Result.Succeeded;
         }
 
+        /// <summary>
+        /// Enables the DiGi assembly resolver with managed and native probe directories for the
+        /// running Revit version.
+        /// </summary>
+        /// <param name="application">The Revit application being started.</param>
+        /// <returns>
+        /// <see cref="Result.Succeeded"/> when the resolver was enabled,
+        /// <see cref="Result.Cancelled"/> when the version-specific directory is missing,
+        /// <see cref="Result.Failed"/> when the Revit version cannot be determined.
+        /// </returns>
         public Result OnStartup(UIControlledApplication application)
         {
             if(application?.ControlledApplication?.VersionNumber is not string versionNumber)

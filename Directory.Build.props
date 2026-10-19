@@ -19,5 +19,10 @@
     <!-- Informational version (human-readable, can include git commit later) -->
     <InformationalVersion>$(Major).$(Minor).$(Build).$(Revision)</InformationalVersion>
   </PropertyGroup>
+
+  <!-- Enable XML Documentation file generation for all non-test C# projects -->
+  <PropertyGroup Condition="'$(IsTestProject)' != 'true' And '$(MSBuildProjectExtension)' == '.csproj'">
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
 </Project>
 
