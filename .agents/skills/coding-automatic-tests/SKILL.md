@@ -1,104 +1,178 @@
 ---
 name: coding-automatic-tests
-description: Use when writing or adding xUnit automatic tests for C# classes, structures, or extension methods. Covers naming, Facts partial class structure, shared test-data fixtures, XML docs for tests, and serialization, tolerance, and performance test patterns.
+description: "Use when writing or adding xUnit tests for C# classes, structs, or extension methods - Facts partial class structure, naming, shared test-data fixtures in DiGi.Test/files/, test reports and diagnostic dumps written to DiGi.Test/user files/reports/, and serialization, tolerance-boundary, and performance test patterns. Also covers measuring a benchmark Fact in isolation (a figure read off a full-suite run is contaminated by xUnit parallel collections and is not comparable to an isolated one), opening a defect fix with a Fact that reproduces the reported symptom on the unmodified code, and proving a kept fallback unreachable before deleting it. Also covers making sure both sides of an A/B ran the intended binary (a Debug/Release mismatch in bin, a scratch harness copying its HintPath dll at its own build time, a cp/mv-restored file keeping its old mtime so the incremental build skips it - build --no-incremental then dotnet test --no-build), asymmetric fixtures for orientation facts (a rectangle mirrors onto itself), phantom Test Explorer entries persisted in .vs/.../TestStore after a rename, and the WPF off-screen render harness (Measure/Arrange/RenderTargetBitmap, pump the dispatcher, walk the visual tree rather than only screenshotting)."
 ---
 
-# Automatic Tests (xUnit)
+# AI Guidelines: Automatic Tests
 
-**Role:** Expert C# .NET QA and Software Automation Engineer.
-**Task:** Generate automatic unit tests for C# classes, structures, and extension methods in this project.
-**Goal:** Comprehensive, warning-free unit tests using xUnit that verify logic, edge-case tolerance boundaries, serialization correctness, and performance benchmarks.
+**Goal:** Generate warning-free xUnit tests covering logic, edge-case tolerance boundaries, serialization correctness, and performance benchmarks.
 
-## Strict Coding Guidelines (alignment with project standards)
+---
 
-1. **English Only:** All generated test code and comments MUST use English naming/terminology.
-2. **Explicit Typing Mandatory:** Avoid `var`. Use explicit variable types everywhere.
-   * *Example:* `double value = 5.0;` instead of `var value = 5.0;`
-   * *Example:* `Core.Classes.Address address = new(...);` instead of `var address = new(...);`
-   * **Target-Typed New:** use `new(...)` instead of explicit type instantiation when the target type is declared (e.g. `Address address = new(...);` not `new Address(...)`), to avoid IDE0090.
-3. **Variable Naming Convention:** Variable/object names inside test methods MUST start with the object's type name in camelCase; append a descriptive suffix after `_` if needed.
-   * *Complex Type Examples:* `PointNode pointNode_Base`, `PointNode pointNode_Temp`, `Segment3D segment3D_Inside`.
-   * **Plural Naming for Collections:** don't prefix with the collection type (avoid `listPoints`, `arraySegments`); use the element type name pluralized (`point3Ds`, `segment3Ds`).
-   * **Exception for Primitive/Simple Types:** standard camelCase is fine for `double`, `string`, `int`, `bool`, etc. (`double tolerance`, `string name`, `int count`, `double result`).
-4. **Zero Warnings & Messages:** No compiler warnings or analyzer messages; handle nullability (`?`) correctly.
+## 1. Coding Rules
 
-## xUnit Testing Standards & Project Structure
+- Conform strictly to production C# guidelines (see [Coding - General.md](Coding%20-%20General.md)): English only, explicit typing (no `var`), camelCase naming with type prefixes (`pointNode_Base`), plural element collection names (`point3Ds`), zero compiler/analyzer warnings.
 
-1. **Test Project Separation:** test projects follow `[ProjectName].xUnit` (e.g. `DiGi.Core.xUnit`, `DiGi.Geometry.xUnit`).
-2. **Partial Test Class (`Facts`):** all test methods live inside `public partial class Facts`, grouping all tests per namespace.
-3. **Directory Structure:** place test files inside the `/Facts` directory of the test project.
-4. **Namespace Convention:** namespace of the test file matches the test project namespace (e.g. `DiGi.Core.xUnit`, `DiGi.Geometry.xUnit`).
-5. **Global Usings:** `Xunit` is globally imported via project configuration — do NOT add `using Xunit;`.
-6. **Attributes:** use `[Fact]` to mark test methods.
-7. **Method Naming:** name test methods after the class/property/method under test (e.g. `Color()`, `PlanarIntersectionResult_Performance()`).
-8. **XML Documentation for Tests:**
-   * Every test method MUST have a `<summary>` block describing what is tested.
-   * No empty lines within XML doc blocks (causes tooltip rendering issues in Visual Studio) — use `<para>` for paragraph breaks instead.
+---
 
-## Shared Test Data Files (Fixtures)
+## 2. xUnit Project Structure
 
-When a test needs an on-disk input file (`.gmf`, `.json`, `.epw`, …), use the **one shared `files` directory** — do NOT add a per-project data folder.
+- **Naming:** One test project per project: `[ProjectName].xUnit` (e.g. `DiGi.Core.xUnit`).
+- **Test Class:** `public partial class Facts` under `/Facts/` directory. One shared `Facts` class per namespace.
+- **Namespace:** Matches test project (`namespace DiGi.Core.xUnit`).
+- **Usings:** `Xunit` is configured as a global using — **do NOT add `using Xunit;`**.
+- **Attributes:** Mark test methods with `[Fact]`; a fact that takes longer than 2 s is `[MediumFact]` or `[LongFact]` instead (§4 *Test Duration*).
+- **Method Naming:** Name method directly after target class/property/method (`Color()`, `PlanarIntersectionResult_Performance()`).
+- **Documentation:** Include XML `<summary>` on every test method. Do not leave blank lines in doc blocks; use `<para>`.
 
-1. **Location:** `DiGi.Test/files/` (the `DiGi.Test` repo sits beside the other `DiGi.*` repos under the `DigiProject` workspace root; from a `DiGi.Test/<ProjectName>.xUnit/` dir it is `../files/`). The path is given relative to the workspace root because this guideline lives in the separate `DiGi.Maintenance` repo.
-2. **Add a fixture:** drop the file into `DiGi.Test/files/` and reference it by file name only. Files are read **in place** (not copied to build output) — no `<None CopyToOutputDirectory>` entry needed.
-3. **Resolve the path:** `Core.xUnit.Query.FilePath(System.Reflection.Assembly.GetExecutingAssembly(), "<fileName>")` returns the absolute path to `DiGi.Test/files/<fileName>`; for the directory itself use `assembly.FilesDirectory()`. Both live in `DiGi.Core.xUnit/Query/` (`FilePath.cs`, `FilesDirectory.cs`) and resolve by walking up from the test assembly's `bin/<ProjectName>.xUnit/` output. `FilePath` `Assert`s the directory resolves, so a `null`/missing result fails the test cleanly.
-4. **No `using` needed** — call it fully qualified as `Core.xUnit.Query.FilePath(...)`; it resolves via the same innermost-enclosing-namespace lookup as `Core.xUnit.Query.SerializationCheck(...)`, as long as the test namespace nests under `DiGi`. Add `using System.Reflection;` (or fully qualify `Assembly`).
-5. **Example:**
-   ```csharp
-   using System.Reflection;
-   // ...
-   string? path = Core.xUnit.Query.FilePath(Assembly.GetExecutingAssembly(), "0207_GML.gmf");
-   Assert.False(string.IsNullOrWhiteSpace(path));
-   Assert.True(System.IO.File.Exists(path));
-   ```
-   References: `DiGi.GIS.xUnit/Facts/OrtoDatas.cs`, `DiGi.EPW.xUnit/Facts/EPWFile.cs`, `DiGi.Geometry.xUnit/Facts/InRange.cs`.
-6. **Large binaries** (multi-MB `.gmf`, etc.) are git-tracked (not ignored) — prefer a representative-but-minimal sample, and consider Git LFS if size becomes a concern.
+---
 
-## Common Testing Patterns & Assertions
+## 3. Shared Test Data Fixtures & Test Reports
 
-### 1. Basic Assertions
-`Assert.Equal(expected, actual)`, `Assert.True(condition)` / `Assert.False(condition)`, `Assert.NotNull(object)` / `Assert.Null(object)`, `Assert.Single(collection)`.
+- **Shared Input Data Fixtures (`DiGi.Test/files/`):**
+  - **Directory Path:** `DiGi.Test/files/` (workspace root level; do not create per-project data folders).
+  - **Asset Access:** Read input files in place. Do not set `<CopyToOutputDirectory>`.
+  - **Path Resolution:**
+    - File path: `Core.xUnit.Query.FilePath(Assembly.GetExecutingAssembly(), "fileName.ext")`
+    - Directory path: `assembly.FilesDirectory()`
+    - Requires `using System.Reflection;`. Call fully-qualified: `Core.xUnit.Query.FilePath(...)`.
+    - `FilePath` asserts directory existence and fails cleanly if missing.
+- **Default Path for Test Reports & Diagnostic Outputs (`DiGi.Test/user files/reports/`):**
+  - **Rule:** ALL reports, text dumps, benchmark logs, and diagnostic output files produced during test execution MUST be saved to `user files/reports/` (never in `files/`).
+  - **Path Resolution Helpers:**
+    - Reports directory: `assembly.ReportsDirectory()` or `Core.xUnit.Query.ReportsDirectory(Assembly.GetExecutingAssembly())` (resolves and creates `DiGi.Test/user files/reports/`).
+    - User files directory: `assembly.UserFilesDirectory()` (resolves and creates `DiGi.Test/user files/`).
+  - **Portability:** Use relative paths or extension methods. Do NOT hardcode machine-specific absolute paths.
 
-### 2. Serialization and Deserialization Round-Trip
-* Standard object serialization validation: `Query.SerializationCheck(object_Instance);`
-* String/JSON serialization: `Convert.ToSystem_String(object)` and `Convert.ToDiGi<T>(json)?.FirstOrDefault()` for deserialization.
-* `SerializationCheck` lives in `DiGi.Core.xUnit`. When the test project's own namespace differs (e.g. `DiGi.EPW.xUnit` testing classes from `DiGi.EPW`), call it fully qualified as `Core.xUnit.Query.SerializationCheck(object_Instance);` — this relies on the same "innermost-enclosing-namespace" lookup as `Core.Query.Clone(...)` (see Coding - General's Serialization Pattern section), so it resolves without an explicit `using DiGi.Core.xUnit;` as long as the test namespace nests under `DiGi`.
-* For every class added under the `SerializableObject` pattern (see Coding - General skill), add one `[Fact]` per class that constructs an instance with realistic values (including `null` for optional fields, and at least one populated nested list/object), asserts the constructor's properties, then calls `SerializationCheck` — this exercises both JSON round-trip and the `Clone()`/`Core.Query.Clone()` copy-constructor paths in one go.
-
-### 3. Tolerance Boundaries
-For geometric/math operations, test behavior at the boundary of a given tolerance (e.g. `1e-3` or `Constants.Tolerance.Distance`):
-* Case exactly inside the boundary.
-* Case exactly outside the boundary.
-
-### 4. Performance Benchmarks
-* **Warm-up Block:** run the target logic once before measuring, to allow JIT compilation.
-* **Stopwatch Measurement:** `System.Diagnostics.Stopwatch.StartNew()`.
-* **Large Dataset:** use complex/large datasets (e.g. a polyline with 1000 vertices).
-* **Execution Assertion:** assert elapsed time below a threshold (e.g. `Assert.True(stopwatch.ElapsedMilliseconds < 5, ...)`).
-
-## Code Examples
-
-### Example 1: Basic Logic Test (`/Facts/Round.cs`)
 ```csharp
-namespace DiGi.Core.xUnit
-{
-    public partial class Facts
-    {
-        /// <summary>
-        /// Tests that the rounding functionality correctly processes a zero value using the defined distance tolerance.
-        /// </summary>
-        [Fact]
-        public void Round()
-        {
-            double value = Core.Query.Round(0, Constants.Tolerance.Distance);
+using System.Reflection;
 
-            Assert.Equal(0.0, value);
-        }
-    }
-}
+// Resolving input fixture file path
+string? pathInput = Core.xUnit.Query.FilePath(Assembly.GetExecutingAssembly(), "sample.gmf");
+Assert.False(string.IsNullOrWhiteSpace(pathInput));
+Assert.True(System.IO.File.Exists(pathInput));
+
+// Resolving test report output path
+string? pathReportsDir = Core.xUnit.Query.ReportsDirectory(Assembly.GetExecutingAssembly());
+Assert.False(string.IsNullOrWhiteSpace(pathReportsDir));
+
+string reportFilePath = System.IO.Path.Combine(pathReportsDir!, "Diagnostic_Report.txt");
+System.IO.File.WriteAllLines(reportFilePath, reportLines);
 ```
 
-### Example 2: Serialization and Conversions Test (`/Facts/Color.cs`)
+---
+
+## 4. Testing Patterns
+
+- **Build what you changed before you test it — `dotnet test` will not.** The xUnit projects reach the code under test through `<Reference><HintPath>`; only `DiGi.Core.xUnit` is a `ProjectReference`. MSBuild cannot see a raw assembly reference as a project to build, so `dotnet test` compiles the test project and its `ProjectReference` chain and then runs **against whatever was last built into the other repositories' `bin`** — your edit included or not. The symptom is the worst kind available: a result identical to the previous run, in either direction. A fix appears not to work; a regression appears not to exist. Build the changed library first, plus any other assembly the facts exercise — the ConsoleApp too, for a fact that calls `Program.Main`:
+  ```powershell
+  dotnet build "..\DiGi.X\DiGi.X\DiGi.X.csproj" -c Debug -m:1
+  dotnet test "DiGi.X.xUnit\DiGi.X.xUnit.csproj" -c Debug -m:1
+  ```
+  **When a run contradicts the change you just made, confirm which binary ran before believing it.** `Get-FileHash` on the consumed `bin` assembly against the build output settles it in one command. Worked example: a corrected exit code kept failing its fact with a byte-identical message across two runs, because both executed the assembly built before the correction — the second "failure" was read as the fix not working. Same `HintPath` opacity in its deployment form: [Coding - General.md](Coding%20-%20General.md) §4.
+- **Assertions:** Use standard xUnit assertions (`Assert.Equal`, `Assert.True`/`False`, `Assert.NotNull`/`Null`, `Assert.Single`).
+- **Serialization Round-Trip:**
+  - Call `Core.xUnit.Query.SerializationCheck(instance)`.
+  - Validate string conversion: `Convert.ToSystem_String(object)` and `Convert.ToDiGi<T>(json)?.FirstOrDefault()`.
+  - Every `SerializableObject` class must have a `[Fact]` testing constructor state, string conversion, and `SerializationCheck`.
+  - **`SerializationCheck` only sees the members your instance populates — and it exercises the serialization + JsonObject-constructor path, not the copy constructor.** It compares the instance's JSON against (a) the round-tripped JSON (`ToSystem_String` → `ToDiGi<T>`) and (b) the `Clone()` JSON; `SerializableObject.Clone()` is itself a JSON round-trip (`ToJsonObject` → `Create.SerializableObject<T>`, i.e. the **JsonObject constructor**), *not* the copy constructor (its `<summary>` says "by serializing and deserializing it"). So a member dropped from the **JsonObject constructor** or its `[JsonInclude]` field is caught only if the fact set that member to something, and a member left at its default is invisible, because serialization is reflection-driven and never notices a default. **The copy constructor `T(T?)` is a separate path `SerializationCheck` never runs — assert it directly: build a `new T(source)` and compare every member.** `DiGi.GIS.YOLO.UI`'s `YearBuiltPredictionPipelineOptions` gained `Radiuses`, and the same commit omitted it from the copy constructor *and* from the committed options JSON; the green fact could see neither, because it set `Years` and never `Radiuses`. `DiGi.GIS`'s `UserYearBuilt` gained `YearBuiltRelation`, `DateTime` and `UserName`; its fact round-trips all three (the deserialization leg) and separately asserts a `new UserYearBuilt(source)` copy — and only that copy assertion fails (`Expected: AtOrBefore` / `Actual: Exact`) when a field is dropped from the copy constructor. **When you add a member to a serializable type, populate it in the existing fact in the same change; if the type has a copy constructor, give it its own direct assertion.**
+  - For models holding timestamps or dates, test `DateTimeOffset` properties to ensure timezone and UTC offset stability across round-trip conversions (avoiding `DateTimeKind.Unspecified` equality mismatches).
+- **Tolerance Boundaries:** Test floating-point operations with test cases exactly *inside* and *outside* the boundary (`Constants.Tolerance.Distance` or `1e-3`).
+- **Test Duration (Short / Medium / Long):** every fact is classified by how long one run of it takes, so a quick run can leave out the slow ones.
+  | Duration | Time per fact | Attribute |
+  |---|---|---|
+  | Short | ≤ 2 s | `[Fact]` (no change) |
+  | Medium | 2–30 s, **or any fact that calls a live external service** | `[MediumFact]`; `[MediumSkippableFact]` in the PostgreSQL projects |
+  | Long | > 30 s | `[LongFact]` |
+  - **Selection is cumulative**: the environment variable `DIGI_TEST_MAX_DURATION` (`Short` | `Medium` | `Long`) runs every fact up to that duration and skips the rest with a reason naming the setting. Unset = **Medium**, so a plain `dotnet test` or VS *Run All* skips only the Long facts.
+  - **Switch without rebuilding**: VS → *Test ▸ Configure Run Settings ▸ Select Solution Wide runsettings File* → `TestDuration.Short|Medium|Long.runsettings` (DiGi.Test root; deselect to return to Medium). CLI → `dotnet test DiGi.Test.slnx --settings TestDuration.Short.runsettings`, or `$env:DIGI_TEST_MAX_DURATION = 'Long'`.
+  - **Classify by measurement, not by guess.** Time the fact with its project run alone (Debug), never in a parallel full-suite run. Cap the run with `--blame-hang --blame-hang-timeout 30s --blame-hang-dump-type none` so a fact over 30 s is stopped rather than run to completion; the blame `Sequence_*.xml` names it. The facts in one project form one xUnit collection and run sequentially, so the blame always names exactly one fact.
+  - **The attributes live in namespace `Xunit`** (`DiGi.Core.xUnit/Classes/Attribute/`, beside `Xunit.SkippableFact`'s `[SkippableFact]`), so the global `using Xunit` picks them up. Do **not** add `using DiGi.Core.xUnit;` to a fact file to reach them: it imports a second `Query` class, and an unqualified `Query.X` in code or in a `<see cref>` becomes ambiguous (CS0104 / CS1574). Likewise, never add a `Constants` namespace under `DiGi.Core.xUnit`: it hides `DiGi.Core.Constants` from every file in that project (CS0234).
+  - Append a `<para>` to the fact's `<summary>` giving its duration and the measured time (`Medium test (10.5 s): runs when DIGI_TEST_MAX_DURATION is Medium (the default) or Long.`).
+  - Measured 2026-10-01: Short about 2 000 facts / 19 s for the whole DiGi.Test suite in parallel; Medium adds 47 (83 s); Long adds 6 (Solar irradiance and shading benchmarks, YOLO training smoke runs, Polyhedron `IsClosed` benchmark). The full report is written to `DiGi.Test/user files/reports/TestDuration.md` when it is regenerated.
+- **Performance Benchmarks:**
+  0. **Measure the benchmark `[Fact]` in isolation** — `dotnet test <project> -c Release --filter "FullyQualifiedName~<TestName>"`. Never read a figure off a full-suite run: xUnit executes collections in parallel, so the rest of the suite competes for cores with the thing being timed. Same code, same machine, `Mesh3D_Difference_Performance`: **983 ms in-suite vs 1306-1402 ms isolated** before a fix, then **1134 ms in-suite vs 623-790 ms isolated** after it. The distortion is not a constant offset, so an in-suite number and an isolated number are **not comparable at all** — comparing the two here would have reversed the apparent sign of a 1.9x improvement.
+  1. Execute a single warm-up run to trigger JIT compilation.
+  2. Measure execution time using `System.Diagnostics.Stopwatch.StartNew()`.
+  3. Repeat the measurement three times and report the **range**, not a single figure.
+  4. Assert execution time remains below the designated threshold (`Assert.True(stopwatch.ElapsedMilliseconds < limit)`). The asserted threshold must clear the **in-suite** time, because that is how CI runs it; report the isolated range, assert against the slower path.
+  5. **A/B against a real baseline, never a stale report.** To compare two implementations, keep a copy of the pre-change file, swap it back in, and re-run isolated under identical conditions. A number from an earlier report was almost certainly produced under different conditions.
+  6. **Make sure both sides of an A/B ran the binary you think.** Three ways to time the wrong build, each met at least once:
+     - **Configuration:** a repository's `bin` holds whichever configuration was built last. A Debug `DiGi.Geometry.dll` reached through `HintPath` made the new code look *slower* than the old Release one. Build **both** sides `-c Release` and check the consumed dll's size and timestamp.
+     - **A scratch harness copies its `HintPath` dll at the harness's own build time.** Rebuilding the library and re-running the harness measures — or renders — the old code. Rebuild the harness after every library rebuild, or point an `AssemblyLoadContext.Resolving` handler at the library `bin`.
+     - **A file restored with `cp`/`mv` keeps its old modification time**, so an incremental build after a revert-and-restore skips it. `dotnet test` rejects `--no-incremental`: run `dotnet build --no-incremental`, then `dotnet test --no-build`.
+- **Comparing Two Implementations (Parity Tests):** when a rewrite, a port or a second engine has to
+  agree with an existing one, the acceptance is a comparison rather than a threshold, and the shape of
+  the bound decides whether the test is worth anything.
+  - **Measure the distribution before stating the tolerance.** A bound guessed up front is either so
+    tight it fails on legitimate noise or so loose it proves nothing. Run the comparison, look at the
+    median, the percentiles and the outliers, then write the assertion.
+  - **Bound a percentile, plus a structural invariant that holds for every item.** A maximum has to be
+    widened until it stops detecting regressions. Proving an ONNX detector reproduced a CUDA/torch one
+    over 2 000 images: median coordinate deviation **0.004 px**, 99th percentile **0.034 px**, but 2 of
+    1 639 matched detections moved over a pixel and the worst moved **3.31 px**. A maximum would have
+    had to be ~4 px — against a 0.004 px median, a bound that can no longer notice a real regression
+    while still looking green. The percentile carries bulk agreement; a per-item invariant (there, the
+    overlap of each matched pair staying above 0.95) carries the guarantee that no individual item
+    drifted into being a different thing.
+  - **Diagnose the outlier before excusing it.** "Floating point" is a hypothesis, not a finding. That
+    3.31 px pair had **one** item on each side, so it was not a tie broken differently, and its
+    confidence agreed to **1e-5** while the geometry moved — an asymmetry that pointed at one specific
+    stage (a softmax expectation in stride units) rather than at noise everywhere. An outlier you
+    cannot account for is a defect until shown otherwise.
+  - **Put a guard band around any reporting threshold.** An item whose score sits on the cutoff
+    legitimately appears on one side and not the other; counting that as disagreement makes the bar
+    unmeetable. Exclude a band around the threshold from count comparisons and say so in the report.
+  - **Write the report, and keep the evidence on failure.** The fact should emit the figures it
+    measured to `assembly.ReportsDirectory()` and preserve both outputs when a bound is missed —
+    otherwise a red build tells you a number without letting you look at the case that produced it.
+  - **Guard machine-specific inputs.** A parity fact needing large models or an external interpreter
+    reads their paths from a git-ignored conf and **returns without asserting** when it is absent, so
+    the suite still runs everywhere. Sample size belongs in that conf too: a percentile over a handful
+    of items is just the maximum again, so assert it only above a stated minimum count.
+- **Culture Scope For Keys And Identities:** a fact for anything rendered to a string that must match
+  across machines (dictionary keys, references, hashes — `Coding - General.md` §1.19) runs its assertions
+  twice, the second time under a culture that changes the decimal separator, and asserts the raw
+  `ToString()` **differs** while the key does not. `CultureInfo.CurrentCulture` is per thread, so the
+  scope is safe under xUnit's parallel collections; restore it in `finally`:
+  ```csharp
+  CultureInfo cultureInfo = CultureInfo.CurrentCulture;
+  try
+  {
+      CultureInfo.CurrentCulture = new CultureInfo("pl-PL");
+
+      Assert.NotEqual("[0.5, 12.25]", range_Double.ToString());
+      Assert.Equal("[0.5, 12.25]", Query.Key(range_Double));
+  }
+  finally
+  {
+      CultureInfo.CurrentCulture = cultureInfo;
+  }
+  ```
+  Reference: `DiGi.Test/DiGi.Typology.Visual.xUnit/Facts/Query_Key.cs`. A key fact that passes only on
+  an invariant-culture machine has not tested the property it exists for.
+- **Reproduce Before Fixing:** a defect fix opens with a `[Fact]` that fails **on the unmodified code with the reported symptom** — matching the reported stack trace when there is one — and that `[Fact]` is committed in the same change. If a synthetic fixture will not reproduce the defect, build one from real data already in `DiGi.Test/files/`. `Mesh3D_Difference_DenseCluster` and `Mesh3D_Difference_FaultIsolation` reproduced [DiGi.Geometry#2](https://github.com/DiGi-Organization/DiGi.Geometry/issues/2)'s `ConstraintEnforcementException` with its exact stack before a line of the fix was written.
+- **Proving a Kept Fallback Is Dead:** when a change keeps the previous implementation as a safety net, establish whether it is reachable instead of guessing — replace the fallback call with `throw`, run the whole suite. If nothing fails, the fallback is unreached and should be deleted rather than carried. That is how `DiGi.Geometry`'s conforming-Delaunay triangulation path was retired (326 to 126 lines) with evidence.
+- **A Guard Must Be Shown To Fail:** *Reproduce Before Fixing* covers a `[Fact]` written against a known defect. A guard written **proactively** — asserting a property nobody has yet violated — gets no such proof for free, and an assertion that cannot fail for the reason it exists is worse than no test, because a comment claiming it guards something stops anyone looking again.
+  - **Construct the violation and watch the assertion fail**, then restore. If it still passes, the guard is decoration.
+  - **Worked example.** A smoke `[Fact]` asserted a predicted year fell between 1900 and 2100, with a comment claiming an all-default row would land outside that range and so prove features were reaching the model. Measured: a row carrying **nothing but an identifier** scored `2012`. The assertion could never have caught the binding failure it was written for — the same failure that had the deployed path scoring an R² of −1.771 while throwing nothing.
+  - **Prefer a differential assertion to a plausibility range.** Ranges pass on garbage. Score the same input twice — once complete, once stripped of the thing under test — and assert the results **differ**. That tests the mechanism rather than the shape of the output.
+- **Database Facts Leave The Base As They Found It:** a fact that writes to a live database connects through its project's own `*_Test.conf`, never the conf name a deployed host reads. The host's conf names the production database, so a copy of it, or a development conf pointed at the server, reaches production from wherever the suite runs, and `user files/` reaches the test `bin` whole. Tests run only on development machines; the servers have no development tooling ([Coding - Deployed WebAPI.md](Coding%20-%20Deployed%20WebAPI.md) §5). The fact also restores every row it writes that is not its own scratch row. A transaction around the fact cannot do that, because each converter opens its own connection. Instead, snapshot the rows before the first write, write them back in `finally`, and assert that they equal the snapshot; remove scratch rows before the write and again in `finally`. Show the restore failing by running once without it. Detail: [Coding - PostgreSQL.md](Coding%20-%20PostgreSQL.md) §6 *A test project reads its own conf*; reference: `bodyplan.PostgreSQL.xUnit` (`RecipeMatch`, `TestDatabase`), bodyplan#47.
+- **Fixtures Too Symmetric To Fail:** an orientation, mirroring or normalisation fact built only from axis-aligned rectangles or boxes proves nothing — a rectangle maps onto itself under a mirror through its centre, which is how `Planar.Flip` mirrored every face it turned while every box fixture passed. Include an asymmetric shape (trapezoid, gable, L-shape) and assert invariants independent of the code under test. Detail: [Coding - Geometry.md](Coding%20-%20Geometry.md) §2.
+- **Phantom Tests In Visual Studio Test Explorer:** Test Explorer persists its tree in `<solution dir>/.vs/<Solution>.slnx/v18/TestStore/0/*.testlog` and never evicts a test that was **renamed, moved to another class or deleted**; it lingers under its old class node as "Not Run" indefinitely, and a green `dotnet test` says nothing about it because it no longer exists. List the phantoms with `grep -oa "<Namespace>\.<OldClass>\.[A-Za-z0-9_]*" .vs/<Sln>.slnx/v18/TestStore/0/*.testlog | sort -u` against `dotnet test --list-tests`; fix by closing Visual Studio and deleting the `TestStore` folder (`.vs/` is git-ignored, only run history is lost). Expect it after any rename sweep of fact methods.
+- **WPF Controls Without Their Host — The Off-Screen Render Harness:** the WPF counterpart of [Coding - Browser Testing.md](Coding%20-%20Browser%20Testing.md). Most `DiGi.UI.WPF` controls are consumed only by the GIS PostgreSQL tray application, which needs credentials and a database before it shows a populated row, so verify layout in a scratchpad console project instead (`net8.0-windows`, `UseWPF`, `HintPath` to `DiGi.UI.WPF` and `DiGi.Core`):
+  - Implement the control's item interface as a **mock in the harness**, adding the plain properties the XAML binds to — WPF binds by reflection against the runtime type.
+  - `new Application();` first; build the control inside a mirror of the host's layout (its `TabControl`, margins — the chrome sets the column widths) and size it to the host's **client** area (an 800×450 window is ~784×411 of content).
+  - `Measure` / `Arrange` / `UpdateLayout`, then pump `Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.SystemIdle, …)` two or three times — a `DataGrid` generates rows on a background pass and renders header-only otherwise. `RenderTargetBitmap` at 192 dpi → `PngBitmapEncoder`; nothing appears on the desktop.
+  - **Walk the visual tree, do not only screenshot it.** Printing each `TextBlock`'s `TextWrapping` / `TextTrimming` / `MaxHeight` / `ToolTip` via `VisualTreeHelper` proves per-row binding behaviour; that is what caught **`Setter.Value` silently dropping a `MultiBinding`** (it accepts a single `Binding`; no build or binding warning, the tooltip simply never appears). `DataGrid` has no `MaxRowHeight` — cap a wrapping cell with `MaxHeight` on the `TextBlock`.
+  - Drive a real dialog with `window.Loaded` → `RenderTargetBitmap`, `FindName`, `RaiseEvent(ButtonBase.ClickEvent)`, and dismiss validation boxes with a `DispatcherTimer` + `FindWindow("#32770", title)` + `WM_CLOSE`. Rebuild the harness after rebuilding the UI project (stale-dll trap above).
+
+---
+
+## 5. Reference Examples
+
+### Basic Test & Serialization (`/Facts/Color.cs`)
+
 ```csharp
 using System.Linq;
 
@@ -107,59 +181,44 @@ namespace DiGi.Core.xUnit
     public partial class Facts
     {
         /// <summary>
-        /// Tests the functionality of the Color class, verifying the conversion between System.Drawing.Color and string representations, as well as ensuring that ARGB values are preserved during these conversions and validating serialization.
+        /// Tests Color conversion between System.Drawing.Color and string formats, validating ARGB preservation and serialization.
         /// </summary>
         [Fact]
         public void Color()
         {
             System.Drawing.Color drawingColor_1 = System.Drawing.Color.Aqua;
-
             Core.Classes.Color color_1 = new(drawingColor_1);
 
             string? string_1 = color_1.ToSystem_String();
-
             Assert.NotNull(string_1);
 
             Core.Classes.Color? color_2 = Convert.ToDiGi<Core.Classes.Color>(string_1)?.FirstOrDefault();
-
             Assert.NotNull(color_2);
 
-            string? string_2 = color_2.ToSystem_String();
-
-            Assert.NotNull(string_2);
-
-            Assert.Equal(string_1, string_2);
-
-            Core.Classes.Color? color_3 = Convert.ToDiGi<Core.Classes.Color>(string_2)?.FirstOrDefault();
-
-            Assert.Equal(color_3.ToSystem_String(), string_2);
-
-            System.Drawing.Color drawingColor_2 = color_3.ToDrawing();
-
+            System.Drawing.Color drawingColor_2 = color_2.ToDrawing();
             Assert.Equal(drawingColor_1.A, drawingColor_2.A);
             Assert.Equal(drawingColor_1.R, drawingColor_2.R);
             Assert.Equal(drawingColor_1.G, drawingColor_2.G);
             Assert.Equal(drawingColor_1.B, drawingColor_2.B);
 
-            Query.SerializationCheck(color_1);
+            Core.xUnit.Query.SerializationCheck(color_1);
         }
     }
 }
 ```
 
-### Example 3: Performance Benchmark & Boundary Test (`/Facts/PlanarIntersectionResult.cs`)
+### Boundary & Benchmark Test (`/Facts/PlanarIntersectionResult.cs`)
+
 ```csharp
 using DiGi.Geometry.Spatial;
 using DiGi.Geometry.Spatial.Classes;
-using DiGi.Geometry.Spatial.Interfaces;
-using DiGi.Geometry.Planar.Classes;
 
 namespace DiGi.Geometry.xUnit
 {
     public partial class Facts
     {
         /// <summary>
-        /// Tests planar intersections at tolerance boundaries.
+        /// Tests planar intersections at tolerance boundaries and measures execution performance.
         /// </summary>
         [Fact]
         public void PlanarIntersectionResult_ToleranceBoundaries()
@@ -167,40 +226,28 @@ namespace DiGi.Geometry.xUnit
             Plane plane = Spatial.Constants.Plane.WorldZ;
             double tolerance = 1e-3;
 
-            // Endpoint exactly inside boundary (Z = tolerance - 1e-9)
+            // Inside boundary (Z = tolerance - 1e-9)
             Segment3D segment3D_Inside = new(new Point3D(0, 0, 1e-3 - 1e-9), new Point3D(0, 0, 10));
-            PlanarIntersectionResult? planarIntersectionResult_Inside = Create.PlanarIntersectionResult(plane, segment3D_Inside, tolerance);
-            Assert.NotNull(planarIntersectionResult_Inside);
-            Assert.True(planarIntersectionResult_Inside.Intersect);
+            PlanarIntersectionResult? result_Inside = Create.PlanarIntersectionResult(plane, segment3D_Inside, tolerance);
+            Assert.NotNull(result_Inside);
+            Assert.True(result_Inside.Intersect);
 
-            // Endpoint exactly outside boundary (Z = tolerance + 1e-9)
+            // Outside boundary (Z = tolerance + 1e-9)
             Segment3D segment3D_Outside = new(new Point3D(0, 0, 1e-3 + 1e-9), new Point3D(0, 0, 10));
-            PlanarIntersectionResult? planarIntersectionResult_Outside = Create.PlanarIntersectionResult(plane, segment3D_Outside, tolerance);
-            Assert.NotNull(planarIntersectionResult_Outside);
-            Assert.False(planarIntersectionResult_Outside.Intersect);
+            PlanarIntersectionResult? result_Outside = Create.PlanarIntersectionResult(plane, segment3D_Outside, tolerance);
+            Assert.NotNull(result_Outside);
+            Assert.False(result_Outside.Intersect);
         }
 
-        /// <summary>
-        /// Tests the performance of planar intersection calculations.
-        /// </summary>
         [Fact]
         public void PlanarIntersectionResult_Performance()
         {
             Plane plane = Spatial.Constants.Plane.WorldZ;
 
-            // Warm up / JIT compile before measuring performance
-            {
-                Polyline3D polyline_Warmup = new([new Point3D(0, 0, 10)]);
-                _ = Create.PlanarIntersectionResult(plane, polyline_Warmup);
-                BoundingBox3D box_Warmup = new(new Point3D(-1, -1, 2), new Point3D(1, 1, 4));
-                Polyhedron? poly_Warmup = Create.Polyhedron(box_Warmup);
-                if (poly_Warmup != null)
-                {
-                    _ = Create.PlanarIntersectionResult(plane, poly_Warmup);
-                }
-            }
+            // Warm up / JIT compile
+            Polyline3D polyline_Warmup = new([new Point3D(0, 0, 10)]);
+            _ = Create.PlanarIntersectionResult(plane, polyline_Warmup);
 
-            // Complex Polyline with 1000 vertices completely disjoint from plane
             List<Point3D> point3Ds = [];
             for (int i = 0; i < 1000; i++)
             {
@@ -209,12 +256,12 @@ namespace DiGi.Geometry.xUnit
             Polyline3D polyline3D_Complex = new(point3Ds);
 
             System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            PlanarIntersectionResult? planarIntersectionResult = Create.PlanarIntersectionResult(plane, polyline3D_Complex);
+            PlanarIntersectionResult? result = Create.PlanarIntersectionResult(plane, polyline3D_Complex);
             stopwatch.Stop();
 
-            Assert.NotNull(planarIntersectionResult);
-            Assert.False(planarIntersectionResult.Intersect);
-            Assert.True(stopwatch.ElapsedMilliseconds < 5, $"Early exit performance check failed for ISegmentable3D! Took {stopwatch.ElapsedMilliseconds} ms.");
+            Assert.NotNull(result);
+            Assert.False(result.Intersect);
+            Assert.True(stopwatch.ElapsedMilliseconds < 5, $"Intersection check failed threshold! Elapsed: {stopwatch.ElapsedMilliseconds} ms.");
         }
     }
 }

@@ -1,65 +1,96 @@
 ---
 name: coding-templates
-description: Use when creating a new project or solution from a template, or managing templates in the workspace's default templates/ directory. Covers digiwebapigltftemplate, DiGi.Template configurations, and dotnet new template commands.
+description: "Use when creating a new project/solution from a template, or adding/modifying templates in the workspace's default templates/ folder."
 ---
 
 # Coding — Templates
 
-This guideline documents the default location, installation, and usage patterns for project and solution templates within the DiGi project repositories.
-
 ## 1. Templates Folder
 
-The default location for all project and solution templates is the `templates/` directory located at the root of the workspace:
-- **Default path:** `templates/`
-
-### AI Behavior for Missing Templates
-If a task requires a template repository or project configuration that is not currently available locally, the AI model must download or save the template contents into this default `templates/` directory first before attempting to scaffold or use it.
+- **Default Location:** `templates/` directory at the workspace root.
+- **Missing Templates Rule:** If a required template is missing locally, save/download template files into `templates/` before scaffolding.
 
 ---
 
 ## 2. Available Templates
 
-### 2.1 DiGi.WebAPI.GLTF.Template
+### 2.1 `DiGi.WebAPI.GLTF.Template`
 - **Short Name:** `digiwebapigltftemplate`
 - **Location:** `templates/DiGi.WebAPI.GLTF.Template/`
-- **Description:** ASP.NET Core Web API pre-configured with the generic `DiGi.GLTF` 3D visualization engine. It includes generic `GLTFScene` composition and binary glTF (`.glb`) streaming endpoints, response compression, and the `IGLTFNodeConverter` plugin registration hook.
+- **Description:** ASP.NET Core Web API pre-configured with the `DiGi.GLTF` 3D engine, binary glTF (`.glb`) streaming endpoints, response compression, and `IGLTFNodeConverter` plugin registration.
+- **Placement Directive:** Scaffold solution folders **directly under the workspace root** (e.g. `workspace_root/MyNewWebAPI/`). Relative `HintPath` references (`..\..\DiGi.Core\bin\DiGi.Core.dll`) break if placed in deeper subfolders.
 
-#### Key Architectural Rules:
-- **Solution Placement:** Always create/scaffold the solution folder **directly under the workspace root** (e.g. `MyNewWebAPI/` inside the workspace root folder) so relative `HintPath` references to `DiGi.Core`, `DiGi.Geometry`, and `DiGi.GLTF` resolve correctly.
-- **Reference Setup:** A pre-configured project template will reference the main DLLs using relative paths (e.g., `..\..\DiGi.Core\bin\DiGi.Core.dll`). Putting the project in a deeper subfolder will break references.
-
-### 2.2 DiGi.Template
+### 2.2 `DiGi.Template`
 - **Short Name:** N/A (Repository Boilerplate)
 - **Location:** `templates/DiGi.Template/`
-- **Description:** Foundational boilerplate template for all new Visual Studio 2026 solutions. It establishes standard solution-level configurations, coding styles, and build patterns.
-
-#### Key Architectural Rules & Boilerplate Files:
-- **`Directory.Build.props`**: Sets C# 12+ versioning (`<LangVersion>12.0</LangVersion>`), nullable context, implicit usings, warning levels (`TreatWarningsAsErrors`), and automatically enables XML documentation file generation for non-test C# projects.
-- **`Directory.Build.targets`**: Enables build-time `DefaultDocumentation` page generation (suppressing CS1591 only for test projects) and contains centralized targets `CopyFiles` and `CopyUserFiles` to copy runtime assets from `files/` and `user files/` directories directly into the build output path.
-- **`.editorconfig`**: Enforces coding guidelines, making violations of the "no-var" rule, block-scoped namespaces, collection expressions (`[]`), and target-typed `new()` compile as errors.
-- **`DefaultDocumentation.json`**: Configures the API documentation generation schema.
-- **`.gitignore`**: Excludes build logs, user settings, Visual Studio caches, and enforces exclusion of credentials and secrets under the `[Uu]ser [Ff]iles/` directory.
+- **Description:** Boilerplate template for new Visual Studio solutions establishing standard build configurations and coding styles.
+- **Key Files & Configurations:**
+  - **`Directory.Build.props`:** Enforces `<LangVersion>12.0</LangVersion>`, nullable context, implicit usings, `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`, and XML documentation generation for non-test projects.
+  - **`Directory.Build.targets`:** Configures build-time `DefaultDocumentation` generation and defines `CopyFiles`/`CopyUserFiles` asset deployment targets.
+  - **`.editorconfig`:** Enforces explicit typing (no `var`), block-scoped namespaces, collection expressions (`[]`), and target-typed `new()`.
+  - **`DefaultDocumentation.json`:** API documentation schema configuration.
+  - **`.gitignore`:** Ignores build artifacts and enforces exclusion of sensitive files in `[Uu]ser [Ff]iles/`.
 
 ---
 
 ## 3. Template Management Commands
 
-All commands should be executed from the workspace root directory.
+Run commands from workspace root:
 
-### Install a Template
-To install a template locally so it becomes visible to dotnet CLI and Visual Studio:
 ```powershell
+# Install template locally
 dotnet new install "templates/DiGi.WebAPI.GLTF.Template"
-```
 
-### Scaffold a New Project
-To scaffold a new project using the installed template, specify the output folder directly under the workspace root:
-```powershell
+# Scaffold new project under workspace root
 dotnet new digiwebapigltftemplate -n MyGLTFHost -o "MyGLTFHost"
-```
 
-### Uninstall a Template
-To remove a template from dotnet CLI and Visual Studio:
-```powershell
+# Uninstall template
 dotnet new uninstall "templates/DiGi.WebAPI.GLTF.Template"
 ```
+
+---
+
+## 4. Standing Up A New Repository
+
+Scaffolding the solution is the small half. A repository is not finished until it carries the same
+furniture as its siblings, and none of the steps below are implied by `dotnet new` or by creating the
+repository through the GitHub UI. `DiGi.GIS.YOLO.UI` and `DiGi.YOLO.ONNX` are the two most recent
+worked examples; copy from whichever is closer.
+
+### The one that leaks secrets
+
+**A repository created through the GitHub UI does not ignore `user files/`.** GitHub seeds it with the
+stock `VisualStudio.gitignore`, which has no `[Uu]ser [Ff]iles/` rule at all - the template's does, at
+line 378. Until it is replaced, the folder holding `*.conf` connection strings, API keys and machine
+paths is tracked, and the first `git add -A` commits them. **Replace `.gitignore` from the template
+before the first commit**, and prove it:
+
+```powershell
+git check-ignore -v "user files/x"   # must name the [Uu]ser [Ff]iles/ rule
+```
+
+### The rest, in order
+
+1. **Root files from `templates/DiGi.Template/`:** `.editorconfig`, `.gitignore`,
+   `Directory.Build.props`. Set `<Major>`/`<Minor>`/`<Build>` to match the version branch below.
+2. **`Directory.Build.targets`, `DefaultDocumentation.json`, `.github/workflows/sync-wiki.yml`:** copy
+   from a sibling repository. `ApplyDocumentationSetup.ps1` writes all three, but it `Set-Content
+   -Force`s them into **every** `DiGi.*` repository - needless churn across 60+ repositories when one
+   is being set up.
+3. **`.agents/`** via `UpdateAgents.ps1`, **README guidelines block** via `UpdateReadmes.ps1`. Write the
+   repository-specific README intro *first*: `UpdateReadmes.ps1` appends the canonical block below
+   whatever is already there. Both scripts sweep every repository and **commit unless `-NoCommit` is
+   passed**; they stage only `.agents` and `README.md`, so unrelated in-flight work elsewhere cannot be
+   swept in, but check `git status` before running them anyway.
+4. **Labels:** `SyncLabelsAllRepos.ps1 -Repo <name>`. A new repository has GitHub's defaults and **none
+   of the standard taxonomy**, so the first issue filed against it cannot carry the mandatory
+   `type:`/`priority:`/`ai:` labels `GitHub - Issues.md` requires. `DiGi.YOLO.ONNX` hit exactly this.
+5. **`BuildAll.ps1`:** add the `.slnx` **in dependency order**, not alphabetically - the list is
+   consumed top to bottom and a repository placed before what it references by `HintPath` builds
+   against a stale or absent assembly.
+6. **`CheckHostDependencies.ps1`:** add a `$DeploymentUnits` entry only if the repository produces an
+   `Exe`/`WinExe`/web host. A class library has no deployment unit of its own.
+7. **Version branch:** a bare SemVer branch off `main` per `GitHub - Branch Synchronization.md`, pushed
+   with `git push -u origin <version>`, with `Directory.Build.props` agreeing.
+8. **Repository description:** `gh repo edit <owner>/<name> --description "..."` - it is empty by
+   default and shows on every listing.
