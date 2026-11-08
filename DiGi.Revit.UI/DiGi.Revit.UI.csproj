@@ -12,7 +12,6 @@
 
 	<PropertyGroup>
 		<TargetFramework Condition="'$(RevitYear)' == '2025'">net8.0-windows</TargetFramework>
-		<LangVersion>latest</LangVersion>
 		<OutputPath>..\bin\</OutputPath>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 		<AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
